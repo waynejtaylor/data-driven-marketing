@@ -1,0 +1,575 @@
+---
+title: "Multi-Armed Bandits (MAB)"
+author: "MKTG 6279"
+date: "Week 5"
+output: 
+ beamer_presentation:
+  includes:
+   in_header: header_pagenrs.tex
+---
+
+## Today
+
+- What is a multi-armed bandit?
+- Epsilon-greedy
+- Thompson sampling
+- Contextual bandits
+
+```{r echo=FALSE,warning=FALSE,message=FALSE}
+library(tidyverse)
+```
+
+# Multi-Armed Bandits
+
+## What is a multi-armed bandit?
+
+- A situation or problem where you make sequential decisions with multiple options ("arms") with unknown rewards
+
+- The key challenge is determining whether to either...
+  - **Explore**: try different arms to learn rewards
+  - **Exploit**: collect rewards from the arm you think is best
+
+- MAB algorithms aim to maximize cumulative rewards
+
+## Simple example: slot machines
+
+The terminology comes from slot machines in casinos
+
+You can gamble at any slot machine, but the payouts (i.e., the house advantages of each machine) are not known
+
+You start playing at one machine, and get a sense of the payout rate
+
+Do you switch machines or keep playing?
+
+## Everyday examples...
+
+You typically solve these every day:
+
+- Try a new restaurant or stick with the usual?
+- Watch a different show on Netflix or see how the current series pans out?
+- Any relationship
+
+There is a trade-off between sticking with what you know versus trying something new
+
+**In marketing**: whenever the user experience can be dynamically optimized
+
+## Google/Meta Ads Optimization
+
+-  Unlike  static  A/B  testing,  where  traffic  is  split  equally  across  versions,  MAB  gradually  shifts  traffic  toward  the  best-performing  ad  in  real  time
+-  Minimizes  lost  revenue by automatically  optimizing  ad  exposure  instead  of  waiting  until  an  A/B  test  ends
+-  The  algorithm  tracks  click-through  rates  (CTR)  of  different  ads  and  adjusts  the  distribution  dynamically
+
+## Recommendation engines
+
+- Amazon  uses  MAB  to  personalize  product  recommendations  in  real-time
+- Netflix and Spotify  use MAB to  suggest  content  dynamically  based  on  what  a user  has  watched  or  listened  to
+- MAB  dynamically  adjusts  recommendations  as  a  user  interacts  with  the  platform,  optimizing  engagement
+
+Recommend  items  the  user  is  **most  likely  to  like**  (based  on  past behavior) or try  **new  items**  to  learn  more  about  the  user's  preferences?
+
+##  Three popular MAB algorithms
+
+|  Method  |  When  to  Use |
+|----------|----------------|
+|  Epsilon-Greedy      |  Simple to implement, occasional exploration | 
+|  Thompson  Sampling  |  Uses probability distributions to represent uncertainty |
+|  Contextual  Bandit  |  Integrates $X$ when choosing options |
+
+#  Epsilon-Greedy
+
+## What is epsilon-greedy?
+
+A simple and widely used MAB algorithm
+
+**Epsilon**: with probability $\epsilon$ (e.g., 10%), *explore* a random action
+
+**Greedy**: with probability $1 -\epsilon$, *exploit* the best option
+
+A  **greedy  strategy**  always  chooses  what  seems  **best  now**,  without  worrying  about  long-term  consequences
+
+## Using epsilon-greedy
+
+**Why?** The "hello world" of MABs:
+
+- Simple  and  effective
+- Explore  a  little  to  avoid  being  stuck
+- Dynamic,  reduces  wasted  impressions
+
+**When?**
+
+- Low  user  data
+- Early-stage  testing  for  benchmark  
+- Stable  best  option  over  time
+
+## Example with A/B testing
+
+You work at Instagram and want to figure out which digital ad gets a higher click-through rate (clicks/impressions or CTR)
+
+-   Version "A" or version "B"
+
+Run the A/B test for a fixed period, then pick the winner and use for future web traffic
+
+*Note*: since the MAB alogorithms are dynamic, viewing and simulating the data will be a little different this week
+
+## Ground truth data setup
+
+```{r}
+set.seed(3)
+n = 1000
+#mobile and male used later for contextual bandit
+mobile   = sample(0:1,n,TRUE)
+male     = sample(0:1,n,TRUE)
+true_ctr_A = 0.10 - .04*mobile - .02*male
+true_ctr_B = 0.04 + .04*mobile + .06*male
+clicks_a = rbinom(n, 1, true_ctr_A)
+clicks_b = rbinom(n, 1, true_ctr_B)
+```
+
+`mobile` and `male` will be ignored until we get to contextual bandits
+
+Notice how $E[A] = .10 - .04 \times .5 - .02 \times .5 = .07$ and $E[B] = .09$
+
+These are the unconditional CTRs from both ads
+
+## Plain vanilla A/B test
+
+This is very inefficient code, but easier to see how it compares with MAB algorithms
+
+```{r}
+ig_ab = data.frame(mab='A/B',trial=1:n,group=NA,
+                   click=NA,totalClicks=0)
+for(t in 1:n){
+  arm_t   = sample(c('A','B'), 1)
+  click_t = ifelse(arm_t == 'A',clicks_a[t],clicks_b[t])
+  ig_ab$group[t] = arm_t
+  ig_ab$click[t] = click_t
+  if(t == 1) {
+    ig_ab$totalClicks[t] = click_t 
+  } else {
+    ig_ab$totalClicks[t] = ig_ab$totalClicks[t - 1] + 
+      click_t 
+  }
+}
+```
+
+## A/B results
+
+```{r}
+ig_ab %>%
+  group_by(group) %>%
+  summarise(click_bar = mean(click))
+```
+
+## A/B cumulative clicks
+
+```{r echo=FALSE}
+ggplot(ig_ab,aes(trial,totalClicks)) + 
+  theme_minimal() +
+  geom_line()
+```
+
+## Epsilon-Greedy code
+
+*Key modification*: exploit with $\Pr(1-\epsilon)$
+
+See `R` for full code
+
+```{r eval=FALSE}
+if(runif(1) > epsilon) {
+  ctr_a = mean(subset(ig_eg,group=='A' & trial < t)$click)
+  ctr_b = mean(subset(ig_eg,group=='B' & trial < t)$click)
+  arm_t = ifelse(ctr_b > ctr_a, 'B','A')
+  }
+```
+
+```{r echo=FALSE}
+# Epsilon-Greedy algorithm
+ig_eg   = data.frame(mab='EG',trial=1:n,group=NA,click=NA,totalClicks=0)
+epsilon = .1 #explore with this probability
+for (t in 1:n) {
+  
+  arm_t = sample(c('A','B'), 1)
+  
+  #Exploit with pr(1-epsilon)
+  if(runif(1) > epsilon) {
+    ctr_a = mean(subset(ig_eg,group=='A' & trial < t)$click)
+    ctr_b = mean(subset(ig_eg,group=='B' & trial < t)$click)
+    if(!is.na(ctr_a) & !is.na(ctr_b)){ #only exploit with enough data
+      arm_t = ifelse(ctr_b > ctr_a, 'B','A') #defaults to worse true option  
+    }
+  }
+  
+  click_t = ifelse(arm_t == 'A',clicks_a[t],clicks_b[t])
+
+  ig_eg$group[t] = arm_t
+  ig_eg$click[t] = click_t
+  if(t == 1) {
+    ig_eg$totalClicks[t] = click_t 
+  } else {
+    ig_eg$totalClicks[t] = ig_eg$totalClicks[t - 1] + click_t 
+  }
+}
+```
+
+## Epsilon-Greedy results
+
+```{r}
+ig_eg %>%
+  group_by(group) %>%
+  summarise(click_bar = mean(click))
+```
+
+## Epsilon-Greedy cumulative clicks
+
+```{r echo=FALSE}
+ggplot(ig_eg,aes(trial,totalClicks)) + 
+  theme_minimal() +
+  geom_line()
+```
+
+## Epsilon-Greedy vs. A/B
+
+```{r echo=FALSE}
+ig = bind_rows(ig_ab,ig_eg)
+ggplot(ig,aes(trial,totalClicks,color=mab)) + 
+  theme_minimal() + 
+  geom_line()
+```
+
+## Epsilon-Greedy  vs  A/B  Testing
+
+Benefits of dynamic  optimization
+
+-  Faster  Adaptation:  Learns  from  user  behavior  and  quickly  favors  better  options
+-  Smarter  Traffic  Allocation:  Adjusts  in  real  time,  unlike  50/50  A/B  splits
+-  Higher  Reward:  Achieves  more  cumulative  clicks $\rightarrow$ more  value  from  same  traffic
+
+
+# Thompson Sampling
+
+## Thompson sampling
+
+In the epsilon-greedy algorithm, we simply derived the average CTR up through that point to decide which arm to exploit
+
+Thompson sampling is more sophisticated because it puts a **distribution** over each action's reward
+
+This way there is some sense of the uncertainty
+
+We sample from these distributions to distributions to decide which arm to pursue
+
+## Beta distributions
+
+In most A/B testing, the outcome is binary
+
+There is either a "success" or "failure"
+
+- Click
+- Buy
+- Convert
+
+Results are compared using *probabilities* of a success
+
+- "The CTR of version A is 3.5% and version B is 3.8%"
+
+## Beta Distrubutions
+
+In a MAB, we can model the success/failure as a Bernoulli trial, where $p$ represents the probability of a success from a single draw from a given arm
+
+We use the **Beta distribution** to quantify the uncertainty in probability $p$
+
+The Beta distribution is the conjugate prior for the Bernoulli (a special case of the binomial distribution with $n=1$)
+
+The Beta distribution is defined on the interval [0,1], which makes it ideal for modeling probabilities and proportions
+
+When new outcomes are realized, we can update the beliefs of $p$
+
+
+## Using the Beta distribution
+
+
+$$p \sim \text{Beta}(\alpha,\beta)$$
+
+There are two parameters $\alpha > 0$ and $\beta > 0$ which dictate the shape of this distribution
+
+$$E[p] = \frac{\alpha}{\alpha + \beta}$$
+This means the expected probability can be represented as a ratio of successes divided by (successes + failures)
+
+## Updating posterior beliefs
+
+Suppose midway through an A/B test you have the following for ad A:
+
+- 10 successes and 90 failures $\rightarrow (\alpha = 10,\beta = 90)$ 
+
+Ad A will have an expected value of $\frac{10}{10+90} = 10\%$
+
+A new impression is generated and clicked on (success). We can update the posterior as follows: $\alpha = 10 + 1 = 11$
+
+With more impressions, the dispersion around the mean will become tighter
+
+## Fro $n > 0$, $E[p] = .1$
+
+```{r echo=FALSE}
+p = seq(0,1,.01)
+beta_dist_p = data.frame(p = p, d = dbeta(p, 1, 1), type = 'n = 0')
+beta_dist_1 = data.frame(p = p, d = dbeta(p, 2, 18), type = 'n = 20')
+beta_dist_2 = data.frame(p = p, d = dbeta(p, 30, 270), type = 'n = 300')
+beta_dist_all   = bind_rows(beta_dist_p, 
+                            beta_dist_1,
+                            beta_dist_2)
+
+# Create the plot
+ggplot(beta_dist_all, aes(x = p, y = d, color = type)) +
+  geom_line() +
+  geom_vline(xintercept = .1,linetype='dashed') +
+  labs(x="Estimated Probability",y = "Density",color = "") +
+  theme_minimal()
+```
+
+
+## Thompson Sampling code
+
+*Key modification*: expected reward (CTR) is drawn from Beta distribution
+
+See `R` for full code
+
+```{r eval=FALSE}
+  clicks_a_t  = subset(ig_ts,group == 'A' & 
+                         trial < t)$click
+  clicks_b_t  = subset(ig_ts,group == 'B' & 
+                         trial < t)$click
+  sample_A    = rbeta(1,sum(clicks_a_t == 1)+1,
+                        sum(clicks_a_t == 0)+1)
+  sample_B    = rbeta(1,sum(clicks_b_t == 1)+1,
+                        sum(clicks_b_t == 0)+1)
+  arm_t       = ifelse(sample_B  >  sample_A,'B','A')
+ 
+```
+
+
+```{r echo=FALSE}
+ig_ts   = data.frame(mab='TS',trial=1:n,group=NA,click=NA,totalClicks=0)
+for (t in 1:n) {
+  
+  clicks_a_t  = subset(ig_ts,group == 'A' & trial < t)$click
+  clicks_b_t  = subset(ig_ts,group == 'B' & trial < t)$click
+  sample_A    = rbeta(1,sum(clicks_a_t == 1)+1,sum(clicks_a_t == 0)+1)
+  sample_B    = rbeta(1,sum(clicks_b_t == 1)+1,sum(clicks_b_t == 0)+1)
+  arm_t       = ifelse(sample_B  >  sample_A,'B','A')
+  
+  click_t = ifelse(arm_t == 'A',clicks_a[t],clicks_b[t])
+
+  ig_ts$group[t] = arm_t
+  ig_ts$click[t] = click_t
+  
+  if(t == 1) {
+    ig_ts$totalClicks[t] = click_t 
+  } else {
+    ig_ts$totalClicks[t] = ig_ts$totalClicks[t - 1] + click_t 
+  }
+}
+```
+
+## Thompson Sampling results
+
+```{r echo=FALSE}
+ig_ts %>%
+  group_by(group) %>%
+  summarise(click_bar = mean(click))
+```
+
+## Thompson Sampling cumulative clicks
+
+```{r echo=FALSE}
+ggplot(ig_ts,aes(trial,totalClicks)) + 
+  theme_minimal() +
+  geom_line()
+```
+
+## Comparisons so far...
+
+```{r echo=FALSE}
+ig = bind_rows(ig_ab,ig_eg,ig_ts)
+ggplot(ig,aes(trial,totalClicks,color=mab)) + 
+  theme_minimal() + 
+  geom_line()
+```
+
+# Contextual  Bandits
+
+##  What  are  contextual  bandits?
+
+An  extension  of  the  standard  MAB  problem  that  incorporates  **contextual  information**
+
+What is contextual information? Any observed data on an indivudal
+
+- Demographics
+- Product characteristics
+- Historical data
+- Basically anything in $X$
+
+## Contextual Bandit code
+
+*Key modification*: predict clicks conditional on context
+
+See `R` for full code
+
+```{r eval=FALSE}
+#this code is repeated for 'b'
+ind_a      = ig_cb$group == 'A' & ig_cb$trial < t
+clicks_a_t = ig_cb$click[ind_a]
+context_a  = cbind(mobile[ind_a],male[ind_a])
+beta_a     = coef(lm(clicks_a_t ~ context_a))
+context_t  = c(1,mobile[t],male[t]) 
+phat_a     = context_t%*%beta_a
+
+arm_t   = ifelse(phat_b  >  phat_a,'B','A')  
+```
+
+
+
+```{r echo=FALSE}
+ig_cb   = data.frame(mab='CB',trial=1:n,group=NA,click=NA,totalClicks=0)
+for (t in 1:n) {
+  
+    #context 
+    ind_a = ig_cb$group == 'A' & ig_cb$trial < t
+    ind_b = ig_cb$group == 'B' & ig_cb$trial < t
+    
+    clicks_a_t = ig_cb$click[ind_a]
+    clicks_b_t = ig_cb$click[ind_b]
+    
+    context_a = cbind(mobile[ind_a],male[ind_a])
+    context_b = cbind(mobile[ind_b],male[ind_b])
+    
+    #No error catching
+    #beta_a = coef(lm(clicks_a_t ~ context_a))
+    #beta_b = coef(lm(clicks_b_t ~ context_b))
+    
+    #https://adv-r.hadley.nz/conditions.html?q=catch#handling-conditions
+    beta_a = beta_b = NULL
+    tryCatch({
+      #E[click|context]
+      beta_a = coef(lm(clicks_a_t ~ context_a))
+      beta_b = coef(lm(clicks_b_t ~ context_b))
+    }, error = function(e) {
+    })
+    
+    arm_t   = sample(c('A','B'), 1)
+    
+    anyError = is.null(beta_a) | is.null(beta_b) | any(is.na(beta_a)) | any(is.na(beta_b))
+    if(!anyError) {
+      
+      context_t = c(1,mobile[t],male[t]) 
+  
+      phat_a = context_t%*%beta_a
+      phat_b = context_t%*%beta_b
+    
+      arm_t   = ifelse(phat_b  >  phat_a,'B','A')  
+    }
+      
+  click_t = ifelse(arm_t == 'A',clicks_a[t],clicks_b[t])
+
+  ig_cb$group[t] = arm_t
+  ig_cb$click[t] = click_t
+  if(t == 1) {
+    ig_cb$totalClicks[t] = click_t 
+  } else {
+    ig_cb$totalClicks[t] = ig_cb$totalClicks[t - 1] + click_t 
+  }
+  
+}
+```
+
+## Contextual Bandit results
+
+These are now conditional means
+
+```{r echo=FALSE}
+ig_cb %>%
+  group_by(group) %>%
+  summarise(click_bar = mean(click))
+```
+
+## Contextual Bandit cumulative clicks
+
+```{r echo=FALSE}
+ggplot(ig_cb,aes(trial,totalClicks)) +
+  theme_minimal() +
+  geom_line()
+```
+
+## Compare all
+
+```{r echo=FALSE}
+ig = bind_rows(ig_ab,ig_eg,ig_ts,ig_cb)
+ggplot(ig,aes(trial,totalClicks,color=mab)) + 
+  theme_minimal() + 
+  geom_line()
+```
+
+
+
+## Contexual Bandit use cases
+
+Unlike  standard  MAB,  which  only  considers  past  rewards,  contextual  bandits  use  **machine  learning  models**  to  predict  the  best  action  given  the  current  context.
+
+Google  Ads  uses  contextual  bandits  to  optimize  search  ads  based  on  user  behavior,  time  of  day,  and  device  type
+
+Netflix  and  Spotify  recommend  content  dynamically  based  on  past  viewing  history,  user  preferences,  and  current  trends
+
+## [Instacart](https://www.instacart.com/company/how-its-made/using-contextual-bandit-models-in-large-action-spaces-at-instacart/)
+
+Use CB to personalize the shopper experience (e.g., some shopper prefer low priced products)
+
+Challenge: CB needs multiple examples of each action, which is hard as number of actions grows
+
+Traditionally, used ML trained on past data to predict predict probability of adding an item to the cart, but this does not extend to search queries
+
+Trained a CB model "to select the best search ranker for each <user, query> context so as to increase the average relevance of search results as measured by cart_adds_per_search (items added to cart per search query)"
+
+## [Netflix](https://netflixtechblog.com/recommending-for-long-term-member-satisfaction-at-netflix-ac15cada49ef)
+
+"These feedback signals can be immediate (skips, plays, thumbs up/down, or adding items to their playlist) or delayed (completing a show or renewing their subscription)"
+
+"We can define reward functions to reflect the quality of the recommendations from these feedback signals and then train a contextual bandit policy on historical data to maximize the expected reward"
+
+Click-through rate (CTR), or in our case play-through rate, can be viewed as a simple proxy reward
+
+- Fast season completion (binging): good
+- Thumbs-down after completion: bad
+- Playing a movie for just 10 minutes: ambiguous
+- Discovering new genres: very good
+
+## Netflix
+
+```{r echo=FALSE, out.width="90%", fig.align="center"}
+knitr::include_graphics("netflixcb.png")
+```
+
+##  Choosing  Your  Bandit
+
+Do  you  have  user  context?
+
+- Yes  $\rightarrow$  Contextual  Bandit
+- No  $\rightarrow$  Want  smarter  exploration?
+  - Yes  $\rightarrow$ Thompson
+  - No  $\rightarrow$ Epsilon-Greedy
+
+## Implementing MAB
+
+What makes contextual bandits ideal for marketers?
+
+- New user, little history
+- Cold-start for new creatives
+- Rapidly changing behavior (e.g., Black Friday)
+- Multiple customer segments
+
+How to execute:
+
+- Platforms (Google, Meta, Mailchimp)
+- DIY with:
+  - Real-time pipeline
+  - Monitoring dashboard
+  - Backend experimentation
+
+MAB $\ne$ just code — it's a smarter way to run marketing campaigns
